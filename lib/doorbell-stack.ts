@@ -11,7 +11,8 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 
 export interface DoorbellStackProps extends cdk.StackProps {
-  phoneNumbers: string[];
+  phoneNumbers?: string[];
+  emailAddresses?: string[];
 }
 
 export class DoorbellStack extends cdk.Stack {
@@ -22,8 +23,12 @@ export class DoorbellStack extends cdk.Stack {
       displayName: 'Community Doorbell Notifications',
     });
 
-    for (const phone of props.phoneNumbers) {
+    for (const phone of props.phoneNumbers ?? []) {
       topic.addSubscription(new subscriptions.SmsSubscription(phone));
+    }
+
+    for (const email of props.emailAddresses ?? []) {
+      topic.addSubscription(new subscriptions.EmailSubscription(email));
     }
 
     const siteBucket = new s3.Bucket(this, 'SiteBucket', {

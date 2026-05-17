@@ -17,30 +17,31 @@ A minimal serverless "doorbell" web app packaged as an AWS CDK project. Communit
    ```bash
    npm install
    ```
-3. Deploy with your phone number:
+3. Deploy with your notification preferences:
    ```bash
+   # Email only
+   cdk deploy -c email='you@example.com'
+
+   # Phone only
    cdk deploy -c phone='+15551234567'
+
+   # Both
+   cdk deploy -c phone='+15551234567' -c email='you@example.com'
    ```
-4. Verify your phone number for SMS (see [SMS Sandbox Setup](#sms-sandbox-setup) below)
+4. If using email: confirm the subscription via the link AWS sends to each address
 5. Share the output URL with your community members
 
-### Multiple phone numbers
+### Multiple recipients
 
-Pass a comma-separated list:
+Pass comma-separated lists:
 
 ```bash
-cdk deploy -c phone='+15551111111,+15552222222'
+cdk deploy -c phone='+15551111111,+15552222222' -c email='a@example.com,b@example.com'
 ```
 
-## SMS Sandbox Setup
+## SMS Sandbox Note
 
-New AWS accounts have SMS in sandbox mode, which only allows sending to verified phone numbers. You must verify your destination number before the doorbell can send SMS:
-
-1. Open the **AWS End User Messaging SMS** console in your deployed region
-2. Go to **Sandbox** > **Destination phone numbers**
-3. Add your phone number and enter the confirmation code sent to it
-
-Once verified, SMS notifications will work for that number. To send to unverified numbers, you'll need to request production access from AWS (takes 1-2 days for approval).
+New AWS accounts have SMS in sandbox mode, which only allows sending to verified phone numbers. If SMS isn't working, either verify destination numbers via the CLI or request production access. Email subscriptions work immediately (after confirming the subscription link).
 
 ## Toggle the Doorbell
 
