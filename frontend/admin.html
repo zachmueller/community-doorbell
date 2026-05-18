@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Doorbell Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; background: #f5f5f5; padding: 20px;
+        }
+        .container { max-width: 480px; width: 100%; }
+        h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #666; margin-bottom: 2rem; }
+        .form-group { margin-bottom: 1.2rem; text-align: left; }
+        label { display: block; font-weight: 600; margin-bottom: 0.3rem; font-size: 0.9rem; }
+        input[type="text"], input[type="datetime-local"], select {
+            width: 100%; padding: 10px 12px; border: 1px solid #d1d5db;
+            border-radius: 8px; font-size: 1rem;
+        }
+        .datetime-row { display: flex; gap: 8px; }
+        .datetime-row input { flex: 1; }
+        .datetime-row select { width: 140px; flex-shrink: 0; }
+        .toggle-row { display: flex; align-items: center; gap: 10px; }
+        .toggle {
+            width: 48px; height: 26px; background: #d1d5db; border-radius: 13px;
+            position: relative; cursor: pointer; transition: background 0.2s;
+        }
+        .toggle.on { background: #2563eb; }
+        .toggle::after {
+            content: ''; position: absolute; top: 3px; left: 3px;
+            width: 20px; height: 20px; background: white; border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        .toggle.on::after { transform: translateX(22px); }
+        .btn {
+            font-size: 1rem; padding: 12px 24px; border: none;
+            border-radius: 10px; cursor: pointer; transition: all 0.2s;
+            width: 100%; margin-top: 0.5rem;
+        }
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+        .btn-login { background: #fff; color: #333; border: 1px solid #d1d5db; }
+        .btn-login:hover { background: #f9fafb; }
+        #status { margin-top: 1rem; font-size: 0.95rem; min-height: 1.5em; text-align: center; }
+        .success { color: #16a34a; }
+        .error { color: #dc2626; }
+        .error-banner {
+            background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px;
+            padding: 12px 16px; margin-bottom: 1.5rem; color: #dc2626; font-size: 0.9rem;
+        }
+        .login-view { text-align: center; }
+        .form-view { display: none; }
+        .hint { font-size: 0.8rem; color: #888; margin-top: 0.2rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Doorbell Admin</h1>
+        <p class="subtitle">Set event times for the community doorbell</p>
+
+        <div id="error-banner" class="error-banner" style="display:none;"></div>
+
+        <div id="login-view" class="login-view">
+            <button class="btn btn-login" onclick="login()">Login with Google</button>
+        </div>
+
+        <div id="form-view" class="form-view">
+            <div class="form-group">
+                <label>Doorbell Active</label>
+                <div class="toggle-row">
+                    <div id="active-toggle" class="toggle" onclick="toggleActive()"></div>
+                    <span id="active-label">Off</span>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="message">Notification Message</label>
+                <input type="text" id="message" placeholder="Someone is at the door!">
+            </div>
+            <div class="form-group">
+                <label for="start">Start Time</label>
+                <div class="datetime-row">
+                    <input type="datetime-local" id="start">
+                    <select id="start-tz"></select>
+                </div>
+                <p class="hint">Leave blank for no start restriction</p>
+            </div>
+            <div class="form-group">
+                <label for="end">End Time</label>
+                <div class="datetime-row">
+                    <input type="datetime-local" id="end">
+                    <select id="end-tz"></select>
+                </div>
+                <p class="hint">Leave blank for no end restriction</p>
+            </div>
+            <button class="btn btn-primary" id="save-btn" onclick="save()">Save</button>
+            <p id="status"></p>
+        </div>
+    </div>
+
+    <script>
+        let API = '';
+        let COGNITO_DOMAIN = '';
+        let CLIENT_ID = '';
+        let REDIRECT_URI = '';
+        let idToken = null;
+        let activeState = false;
+
+        const TIMEZONES = [
+            { label: 'UTC', offset: '+00:00' },
+            { label: 'NZST (+12)', offset: '+12:00' },
+            { label: 'NZDT (+13)', offset: '+13:00' },
+            { label: 'AEST (+10)', offset: '+10:00' },
+            { label: 'AEDT (+11)', offset: '+11:00' },
+            { label: 'JST (+9)', offset: '+09:00' },
+            { label: 'IST (+5:30)', offset: '+05:30' },
+            { label: 'CET (+1)', offset: '+01:00' },
+            { label: 'GMT (+0)', offset: '+00:00' },
+            { label: 'EST (-5)', offset: '-05:00' },
+            { label: 'CST (-6)', offset: '-06:00' },
+            { label: 'MST (-7)', offset: '-07:00' },
+            { label: 'PST (-8)', offset: '-08:00' },
+        ];
+
+        function getLocalOffset() {
+            const offset = -new Date().getTimezoneOffset();
+            const sign = offset >= 0 ? '+' : '-';
+            const hh = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+            const mm = String(Math.abs(offset) % 60).padStart(2, '0');
+            return sign + hh + ':' + mm;
+        }
+
+        function populateTimezoneSelects() {
+            const localOffset = getLocalOffset();
+            ['start-tz', 'end-tz'].forEach(id => {
+                const sel = document.getElementById(id);
+                TIMEZONES.forEach(tz => {
+                    const opt = document.createElement('option');
+                    opt.value = tz.offset;
+                    opt.textContent = tz.label;
+                    sel.appendChild(opt);
+                });
+                const match = TIMEZONES.find(tz => tz.offset === localOffset);
+                if (match) {
+                    sel.value = localOffset;
+                } else {
+                    const opt = document.createElement('option');
+                    opt.value = localOffset;
+                    opt.textContent = `Local (${localOffset})`;
+                    sel.insertBefore(opt, sel.firstChild);
+                    sel.value = localOffset;
+                }
+            });
+        }
+
+        function checkForErrors() {
+            const params = new URLSearchParams(window.location.search);
+            const errorDesc = params.get('error_description');
+            if (errorDesc) {
+                const banner = document.getElementById('error-banner');
+                let msg = decodeURIComponent(errorDesc).replace(/\+/g, ' ').trim();
+                if (msg.includes('not authorized')) {
+                    msg = 'Your Google account is not authorized to access this admin panel. Please contact the organizer to be added to the allowlist.';
+                }
+                banner.textContent = msg;
+                banner.style.display = 'block';
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+        }
+
+        async function init() {
+            populateTimezoneSelects();
+            checkForErrors();
+
+            const cfg = await fetch('/runtime-config.json').then(r => r.json());
+            API = cfg.apiUrl.replace(/\/$/, '');
+            COGNITO_DOMAIN = cfg.cognitoDomain || '';
+            CLIENT_ID = cfg.cognitoClientId || '';
+            REDIRECT_URI = cfg.adminRedirectUri || window.location.origin + '/admin';
+
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+            if (code) {
+                window.history.replaceState({}, '', window.location.pathname);
+                await exchangeCode(code);
+            } else {
+                idToken = sessionStorage.getItem('doorbell_id_token');
+                if (idToken) showForm();
+            }
+        }
+
+        function login() {
+            const url = `https://${COGNITO_DOMAIN}/login?` +
+                `client_id=${CLIENT_ID}` +
+                `&response_type=code` +
+                `&scope=email+openid+profile` +
+                `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
+            window.location.href = url;
+        }
+
+        async function exchangeCode(code) {
+            const body = new URLSearchParams({
+                grant_type: 'authorization_code',
+                client_id: CLIENT_ID,
+                code: code,
+                redirect_uri: REDIRECT_URI,
+            });
+            try {
+                const res = await fetch(`https://${COGNITO_DOMAIN}/oauth2/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body.toString(),
+                });
+                const data = await res.json();
+                if (data.id_token) {
+                    idToken = data.id_token;
+                    sessionStorage.setItem('doorbell_id_token', idToken);
+                    showForm();
+                } else {
+                    showStatus('Login failed. Please try again.', 'error');
+                }
+            } catch (e) {
+                showStatus('Login failed. Please try again.', 'error');
+            }
+        }
+
+        async function showForm() {
+            document.getElementById('login-view').style.display = 'none';
+            document.getElementById('form-view').style.display = 'block';
+            await loadConfig();
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch(`${API}/admin/config`, {
+                    headers: { 'Authorization': `Bearer ${idToken}` },
+                });
+                if (res.status === 401) {
+                    sessionStorage.removeItem('doorbell_id_token');
+                    window.location.reload();
+                    return;
+                }
+                const config = await res.json();
+                activeState = config.active || false;
+                updateToggle();
+                document.getElementById('message').value = config.message || '';
+                if (config.start) setDatetimeField('start', config.start);
+                if (config.end) setDatetimeField('end', config.end);
+            } catch (e) {
+                showStatus('Failed to load config.', 'error');
+            }
+        }
+
+        async function save() {
+            const btn = document.getElementById('save-btn');
+            btn.disabled = true;
+            const startVal = document.getElementById('start').value;
+            const endVal = document.getElementById('end').value;
+            const startTz = document.getElementById('start-tz').value;
+            const endTz = document.getElementById('end-tz').value;
+            const body = {
+                active: activeState,
+                message: document.getElementById('message').value || 'Someone is at the door!',
+                start: startVal ? startVal + ':00' + startTz : null,
+                end: endVal ? endVal + ':00' + endTz : null,
+            };
+            try {
+                const res = await fetch(`${API}/admin/config`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${idToken}`,
+                    },
+                    body: JSON.stringify(body),
+                });
+                if (res.status === 401) {
+                    sessionStorage.removeItem('doorbell_id_token');
+                    window.location.reload();
+                    return;
+                }
+                if (res.ok) showStatus('Saved!', 'success');
+                else showStatus('Failed to save.', 'error');
+            } catch (e) {
+                showStatus('Failed to save.', 'error');
+            }
+            btn.disabled = false;
+        }
+
+        function toggleActive() {
+            activeState = !activeState;
+            updateToggle();
+        }
+
+        function updateToggle() {
+            const el = document.getElementById('active-toggle');
+            const label = document.getElementById('active-label');
+            el.className = activeState ? 'toggle on' : 'toggle';
+            label.textContent = activeState ? 'On' : 'Off';
+        }
+
+        function setDatetimeField(field, isoString) {
+            try {
+                const offsetMatch = isoString.match(/([+-]\d{2}:\d{2})$/);
+                const offset = offsetMatch ? offsetMatch[1] : getLocalOffset();
+                const d = new Date(isoString);
+                const utcMs = d.getTime();
+                const offsetMinutes = parseOffsetToMinutes(offset);
+                const local = new Date(utcMs + offsetMinutes * 60000);
+                const year = local.getUTCFullYear();
+                const month = String(local.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(local.getUTCDate()).padStart(2, '0');
+                const hours = String(local.getUTCHours()).padStart(2, '0');
+                const minutes = String(local.getUTCMinutes()).padStart(2, '0');
+                document.getElementById(field).value = `${year}-${month}-${day}T${hours}:${minutes}`;
+                document.getElementById(field + '-tz').value = offset;
+            } catch (e) {
+                // leave empty on parse failure
+            }
+        }
+
+        function parseOffsetToMinutes(offset) {
+            const sign = offset[0] === '+' ? 1 : -1;
+            const [hh, mm] = offset.slice(1).split(':').map(Number);
+            return sign * (hh * 60 + mm);
+        }
+
+        function showStatus(msg, type) {
+            const el = document.getElementById('status');
+            el.textContent = msg;
+            el.className = type;
+            if (type === 'success') setTimeout(() => { el.textContent = ''; }, 3000);
+        }
+
+        init();
+    </script>
+</body>
+</html>

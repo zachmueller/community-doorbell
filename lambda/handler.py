@@ -1,6 +1,7 @@
 import boto3
 import json
 import os
+import urllib.request
 from datetime import datetime, timezone
 
 s3 = boto3.client('s3')
@@ -9,6 +10,7 @@ sns = boto3.client('sns')
 BUCKET = os.environ['CONFIG_BUCKET']
 CONFIG_KEY = os.environ['CONFIG_KEY']
 TOPIC_ARN = os.environ['TOPIC_ARN']
+NTFY_TOPIC = os.environ.get('NTFY_TOPIC')
 
 
 def get_config():
@@ -59,6 +61,14 @@ def handler(event, context):
 
         message = config.get('message', 'Someone is at the door!')
         sns.publish(TopicArn=TOPIC_ARN, Message=message)
+
+        if NTFY_TOPIC:
+            req = urllib.request.Request(
+                f'https://ntfy.sh/{NTFY_TOPIC}',
+                data=message.encode(),
+                headers={'Title': 'Doorbell', 'Priority': 'high', 'Tags': 'bell'},
+            )
+            urllib.request.urlopen(req)
 
         return respond(200, {
             'message': 'Organizers have been notified! Someone will be down shortly.',
